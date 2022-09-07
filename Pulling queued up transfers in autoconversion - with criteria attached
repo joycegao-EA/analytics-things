@@ -1,0 +1,24 @@
+with a as (
+    select distinct REQ.ID, CURRENT_STATE, TARGET_CURRENCY_ID, TARGET_AMOUNT, req.STATE, SWIFT_CODE
+from estimator.historical_estimation he
+    join fx.request req on he.TRANSFER_ID=req.ID
+    join fx.recipient re on req.TARGET_RECIPIENT_ID=re.ID
+    join fx.user_profile up on up.id = re.user_profile_id
+    join fx.USER_PROFILE_ADDRESS a on a.id = up.address_id
+WHERE PAYOUT_PARTNER='JpmSwiftUsdPayoutPartner'
+AND re.COUNTRY_OF_ORIGIN='CN'
+and RECEIVER_TYPE ='BUSINESS'
+and up.class = 'com.transferwise.fx.user.BusinessUserProfile'
+and a.COUNTRY_CODE not in (
+    'alb','bfa','brb','cmr','hti','irn','jam','jor','khm',
+    'mar','mli','mlt','mmr','nic','pak','pan','phl','prk',
+    'sen','ssd', 'syr','tur','uga','yem','are'
+        )
+and CURRENT_STATE='READY_FOR_CONVERSION'
+AND req.STATE='READY_FOR_CONVERSION'
+and CURRENT_STATE_TIME > '2022-09-02 00:00:00.000000000'
+and SWIFT_CODE ilike 'ICBKCNBJ%'
+)
+
+select sum(a.target_amount)
+from a;
