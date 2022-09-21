@@ -1,24 +1,44 @@
 with a as (
-    select distinct REQ.ID, CURRENT_STATE, TARGET_CURRENCY_ID, TARGET_AMOUNT, req.STATE, SWIFT_CODE
-from estimator.historical_estimation he
+    select distinct REQ.ID, 
+                    CURRENT_STATE, 
+                    TARGET_CURRENCY_ID, 
+                    TARGET_AMOUNT, 
+                    req.STATE, 
+                    SWIFT_CODE
+from estimator.historical_estimation he        --use this table to get payments that are delayed due to pre-planned cutoff!!!
     join fx.request req on he.TRANSFER_ID=req.ID
     join fx.recipient re on req.TARGET_RECIPIENT_ID=re.ID
     join fx.user_profile up on up.id = re.user_profile_id
     join fx.USER_PROFILE_ADDRESS a on a.id = up.address_id
+--this is to filter out payouts scheduled to go through JPM SWIFT
 WHERE PAYOUT_PARTNER='JpmSwiftUsdPayoutPartner'
+
+--this is to filter out recipients who are in Mainland China
 AND re.COUNTRY_OF_ORIGIN='CN'
+
+--this is to filter out biz recipients
 and RECEIVER_TYPE ='BUSINESS'
+
+--this is to filter our biz senders
 and up.class = 'com.transferwise.fx.user.BusinessUserProfile'
+
+--this is to remove senders from BOS' blacklisted countries
 and a.COUNTRY_CODE not in (
     'alb','bfa','brb','cmr','hti','irn','jam','jor','khm',
     'mar','mli','mlt','mmr','nic','pak','pan','phl','prk',
     'sen','ssd', 'syr','tur','uga','yem','are'
         )
+--by right just CURRENT_STATE is OK, but by left I'm doing both to filter out edge cases. For instance CURRENT_STATE=RFC but req.STATE=MATCHED
 and CURRENT_STATE='READY_FOR_CONVERSION'
 AND req.STATE='READY_FOR_CONVERSION'
+
+--change timestamp accordingly: timestamp here refers to timestamp of CURRENT_STATE
 and CURRENT_STATE_TIME > '2022-09-02 00:00:00.000000000'
+
+--this is to filter our recipients with specific SWIFT codes
 and SWIFT_CODE ilike 'ICBKCNBJ%'
 )
 
+--calculate how much payout are we pushing out: helps with liq ordering
 select sum(a.target_amount)
 from a;
