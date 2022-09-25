@@ -1,0 +1,53 @@
+--Idea of this exercise is to have a better understanding of processing speeds, that we may improve our BOS accuracy
+--BOS RFC-D accuracy look: https://looker.tw.ee/explore/speed/estimation_history?qid=BUfewRYmX2TDicFS6GfSxT&origin_space=3159&toggle=fil
+--Actually, the numbers aren't bad. But...I think it doesn't reflect the real case cuz there are instances when the transfer says TRANSFERRED but irl it's stuck at bene bank
+--the catch of this code is, it can't differentiate Sat/Sun and CNY bank holidays
+
+with a as (
+    select
+       transfer_id,
+       id as state_id,
+       is_rolled_back,
+       state,
+       date_created,
+       lead(state) over (partition by transfer_id order by date_created asc) as lead_state,
+	   --OK! This deserves an essay on the diff parts. You need lead together with order by, cuz
+       --lead is supposed to pull the next row of data, but in SQL data is never sorted properly
+       --unless you instruct so
+       --as for partition in this case, you gotta the diff states and date_created by the PO, cuz
+       --it makes sense to study with all dem timestamps + states bound to 1 PO
+       --since the rationale is to study the timestamps of each stage for that 1 PO
+	   	   
+       lead(date_created) over (partition by transfer_id order by date_created asc) as lead_time,
+       timestampdiff(hour, DATE_CREATED,lead_time) as time_diff_in_hr
+from transfer.transfer_state
+--where TRANSFER_ID=416934979 --this is used to check if your query is OK
+
+--where date_created between '2021-12-31 16:00:00' and '2022-03-31 15:59:59' --pre-lockdown data, uncomment accordingly
+--where date_created between '2022-03-31 16:00:00' and '2022-06-15 15:59:59' --lockdown data, uncomment accordingly
+--where date_created between'2022-06-30 15:59:59' and '2022-08-31 16:00:00' --post-lockdown data, uncomment accordingly
+)
+
+
+
+--select a.TRANSFER_ID,a.state,a.lead_state,a.DATE_CREATED,a.lead_time,a.time_diff
+--this line is for you to see how things are coming
+
+select rec.BIC, AVG(a.time_diff_in_hr) 
+						--avg is 240h for transferred --> BB. This is causing more problem during BOS lockdown, because we are giving false info to csts
+                        --avg is 17h for matched --> BB
+                        --time to 请教 Yue Ying on the technical diff between these 2. Find samples!
+                        --for matched to BB not affected by lockdown (April to 20 June) cuz max is 140h + 38 POs
+                        --transferred to BB is affected, with 125 POs and time range being 0 to 1627h/68 days. Avg is 447h too aka 19 days
+
+from reports.transfer_payin_payout_partner ppp right join a on ppp.TRANSFER_ID=a.transfer_id
+JOIN fx.request r ON a.TRANSFER_ID = r.id
+JOIN fx.recipient rec ON rec.id = r.target_recipient_id
+where ppp.PAYOUT_PARTNER='CnyBoscPayoutPartner'
+and a.state ='TRANSFERRED' --if you change this to matched, then you'll only get 7 rows. 135 for transferred
+and a.lead_state = 'BOUNCED_BACK'
+group by rec.BIC
+order by avg(a.time_diff_in_hr) desc;
+--drilled avg time by recipient bank SWIFT code. The ones w longest delays are shanghai based banks
+--order by a.time_diff, a.STATE;
+
