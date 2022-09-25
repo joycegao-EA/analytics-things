@@ -34,7 +34,7 @@ from transfer.transfer_state
 --this line is for you to see how things are coming
 
 select rec.BIC, AVG(a.time_diff_in_hr) 
-						--avg is 240h for transferred --> BB. This is causing more problem during BOS lockdown, because we are giving false info to csts
+			--avg is 240h for transferred --> BB. This is causing more problem during BOS lockdown, because we are giving false info to csts
                         --avg is 17h for matched --> BB
                         --time to 请教 Yue Ying on the technical diff between these 2. Find samples!
                         --for matched to BB not affected by lockdown (April to 20 June) cuz max is 140h + 38 POs
@@ -48,6 +48,5 @@ and a.state ='TRANSFERRED' --if you change this to matched, then you'll only get
 and a.lead_state = 'BOUNCED_BACK'
 group by rec.BIC
 order by avg(a.time_diff_in_hr) desc;
---drilled avg time by recipient bank SWIFT code. The ones w longest delays are shanghai based banks
 --order by a.time_diff, a.STATE;
 
