@@ -1,0 +1,35 @@
+--Context: We were unable to process BOS BBs back in April when Shanghai went into lockdown for 2 months, as the computer for BOS to do so is in their office
+--Though BOS is now able to process BBs in WFH setting, this code can still come into handy for cases when BOS is unable to process BBs for various reasons
+--The catch of not being to process BBs for extended periods is that the CNY-USD FX rate may drop, resulting in Wise bearing FX losses
+
+
+-- TODO: test this query against 16 June's BBs at POs 432542702, 433954663, 426410383 (cont below)
+-- 395319750 (esp this there's a spreads too high warning - actl at which threshold do we get this?)
+-- 426588091 (interesting cuz CB is involved)
+
+with a as (
+      select distinct per.*, 
+                     source, 
+               TARGETAMOUNT,
+         TARGETLINKEDAMOUNT,
+         targetlinkedamount - targetamount as fx_diff
+      from RECONCILIATION.PARTNER_EXCHANGE_REC per
+             --to access IT links deets, the table is reconciliation.partner_exchange
+             
+            join fx.BANK_TRANSACTION_LINK btl on btl.PARTNER_EXCHANGE_ID = per.flowid
+            join FX.BANK_TRANSACTION bt on bt.id = btl.BANK_TRANSACTION_ID
+      where bt.source='BOSC_DAILY_STATEMENT'
+            and per.finalstatetimestamp between '2022-04-30 16:00:00' and '2022-05-27 15:59:59'
+             --change timestamp accordingly. This is the timestamp when the IT is completely linked. See below per.state='COMPLETED'
+             
+            and per.state = 'COMPLETED'
+            and fx_diff < 0
+             --if I comment the above line out, I will get a net loss of 5407
+             --if I do a fx_diff < 0 aka fx losses I will get -5545
+             --if I do a fx_diff < 0 aka fx gains I will get +137
+order by fx_diff asc, per.finalstatetimestamp desc
+)
+
+select sum(fx_diff)
+from a;
+
