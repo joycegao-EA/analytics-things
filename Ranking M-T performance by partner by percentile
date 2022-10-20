@@ -1,0 +1,22 @@
+with a as (
+    select
+        transfer_id,
+        state,
+        date_created,
+        lead(state) over (partition by transfer_id order by date_created asc) as lead_state,
+        lead(date_created) over (partition by transfer_id order by date_created asc) as lead_time,
+        timestampdiff(second, DATE_CREATED,lead_time) as time_diff_in_sec
+    from transfer.transfer_state
+)
+
+select a.*,
+       PERCENT_RANK() over (order by a.time_diff_in_sec asc) as percentile_rank
+from a join reports.transfer_payin_payout_partner ppp on ppp.TRANSFER_ID=a.transfer_id
+       join estimator.TRANSFER_LIFECYCLE tl on ppp.TRANSFER_ID=tl.TRANSFER_ID
+where ppp.PAYOUT_PARTNER='JpmChatsUsdPayoutPartner' --change accordingly
+  and a.state ='MATCHED'
+  and a.lead_state = 'TRANSFERRED'
+  and a.date_created > '2021-12-31 15:59:59' --Take note this will be the state of the PO (NEW/RECEIVED/RFC/MATCHED/TRANSFERRED/DELIVERED). 
+                                             --Not lead state ya as that will be the following state + its time
+  and tl.IN_HAPPY_FLOW='true' --for unhappy flow this will be false. For speed, we look at only happy flows
+order by a.time_diff_in_sec desc;
