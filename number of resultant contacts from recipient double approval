@@ -1,0 +1,33 @@
+with a as (
+    select *
+    FROM "REPORTS"."DOUBLE_APPROVAL" da LEFT JOIN WORKDAY.HEADCOUNT hc ON
+        CASE WHEN (TO_CHAR(TO_DATE(da."CREATEDAT" ), 'YYYY-MM-DD')) = '2022-04-27'
+            THEN lower((da."REQUESTER")) = (hc."PRIMARY_WORK_EMAIL")
+            AND (TO_CHAR(TO_DATE(hc."REPORT_EFFECTIVE_DATE_AND_TIME" ), 'YYYY-MM-DD')) = '2022-04-26'
+    -- this is a bug in headcount dataset, one day was skipped due to an outage; this is a temporary fix
+        ELSE
+            lower((da."REQUESTER")) = (hc."PRIMARY_WORK_EMAIL")
+            AND (TO_CHAR(DATE_TRUNC('second', hc."REPORT_EFFECTIVE_DATE_AND_TIME" ), 'YYYY-MM-DD HH24:MI:SS')) > (TO_CHAR(TO_DATE(da."CREATEDAT" ), 'YYYY-MM-DD'))
+            AND (TO_CHAR(DATE_TRUNC('second', hc."REPORT_EFFECTIVE_DATE_AND_TIME" ), 'YYYY-MM-DD HH24:MI:SS')) < dateadd(DAY,1,(TO_CHAR(TO_DATE(da."CREATEDAT" ), 'YYYY-MM-DD')))
+            END
+)
+
+select
+    a.ACTIONTYPE,
+    cac.CONTACT__LAST_CONTACT_REASON_TIER_ONE AS contact_reason_T1,
+    AVG(timestampdiff('seconds',( a."CREATEDAT"  ),( a."ASSIGNEDAT"  )) ) AS "da.average_waiting_time_seconds",
+    COUNT(DISTINCT a.ACTIONID) AS count_approvals,
+    count(distinct cac.CONTACT__KEY) AS count_contacts,
+    sum(cat.transfer__invoice_value_gbp)
+    --cac.CONTACT__FINAL_TRANSFER_STATE AS final_state,
+from a
+    join fx.USER_PROFILE up on a.PROFILEID=up.id
+    join RPT_CS_DATA.ANALYTICAL_CONTACT_ATTRIBUTION__TRANSFERS cat on up.USER_ID=cat.TRANSFER__USER_ID
+    join RPT_CS_DATA.ANALYTICAL_CONTACT_ATTRIBUTION__CONTACTS cac on cat.TRANSFER__USER_ID=cac.USER__ID
+where
+    a.COST_CENTER_NAME IN ('Operations APAC', 'Ops EUROPE', 'Ops LATAM & MEA', 'Ops NORTHAM')
+    and a.DOMAIN = 'account-details'
+    and cac.CONTACT__FINAL_TRANSFER_STATE in ('unrefundable', 'refunded', 'transferred')
+    and (contact_reason_T1 ilike '%transfer_status' or
+        contact_reason_T1 ilike '%edit/cancel/refund_a_transfer%')
+group by contact_reason_T1, ACTIONTYPE;
