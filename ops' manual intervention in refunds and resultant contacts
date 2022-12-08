@@ -1,0 +1,48 @@
+with b as (
+    select cac.CONTACT__KEY,
+           cat.TRANSFER__ID,
+           cac.CONTACT__LAST_CONTACT_REASON_TIER_ONE AS contact_reason_T1
+    from RPT_CS_DATA.ANALYTICAL_CONTACT_ATTRIBUTION__TRANSFERS cat
+        join RPT_CS_DATA.ANALYTICAL_CONTACT_ATTRIBUTION__CONTACTS cac
+            on cat.TRANSFER__USER_ID=cac.USER__ID
+    where contact_reason_T1 ilike '%transfer_status' or
+        contact_reason_T1 ilike '%edit/cancel/refund_a_transfer%'
+),
+
+c as (
+    SELECT request.id,
+           request.CANCELLED,
+           ops_manual_steps.ISSUES AS issues
+    FROM FX.REQUEST AS request
+             LEFT JOIN reports.ops_manual_steps  AS ops_manual_steps
+                       ON ops_manual_steps.REQUEST_ID = request.id
+             LEFT JOIN FX.PAYOUT_INSTRUCTION  AS payout_instruction
+                       ON payout_instruction.request_id = request.id
+                           AND payout_instruction.request_id IS NOT NULL
+    WHERE ((UPPER(( case
+                        when payout_instruction.payout_type = 0 then 'Target'
+                        when payout_instruction.payout_type = 1 then 'Excess refund'
+                        when payout_instruction.payout_type = 2 then 'Cancellation refund'
+                        when payout_instruction.payout_type = 3 then 'Extra money'
+                        when payout_instruction.payout_type = 4 then 'Own transfer'
+                        when payout_instruction.payout_type = 5 then 'Micro deposit'
+                        when payout_instruction.payout_type = 6 then 'External'
+                        when payout_instruction.payout_type is null then 'No payout instructions'
+                        else 'ERR! New type - adjust LookML' end
+        )) = UPPER('Cancellation refund'))) AND (ops_manual_steps.ISSUES) IS NOT NULL
+
+    )
+
+
+select
+    c.issues,
+    COUNT(DISTINCT CASE WHEN (UPPER(( case
+                                        when c.cancelled = 1 then true
+                                        when c.cancelled = 0 then false
+            end
+            )) = UPPER('true')) THEN c.id  ELSE NULL END) AS cancelled_POs_count,
+    count(distinct b.CONTACT__KEY) AS count_contacts,
+    count_contacts/cancelled_POs_count AS contact_rate
+from b join c on b.transfer__id=c.id
+group by 1
+order by 4;
