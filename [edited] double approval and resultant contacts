@@ -1,0 +1,56 @@
+-- KEY QN: When it comes to delay in refunds due to pending double approval of manual sender refund account creation, how much contacts is it bringing?
+
+--pulling tables that we may limit scope of double approval data to payops only
+--look powering this CTE: https://looker.tw.ee/explore/ops/double_approval?qid=YfnBjXL2xExkSKYEezNt6F&origin_space=20&toggle=fil,vis
+--I did very little changes to the query behind the look
+with a as (
+    select
+        *
+    FROM REPORTS.DOUBLE_APPROVAL da LEFT JOIN WORKDAY.HEADCOUNT hc ON
+        CASE WHEN (TO_CHAR(TO_DATE(da.CREATEDAT ), 'YYYY-MM-DD')) = '2022-04-27'
+             THEN lower((da.REQUESTER)) = (hc.PRIMARY_WORK_EMAIL)
+             AND (TO_CHAR(TO_DATE(hc.REPORT_EFFECTIVE_DATE_AND_TIME), 'YYYY-MM-DD')) = '2022-04-26'
+            -- this is a bug in headcount dataset, one day was skipped due to an outage; this is a temporary fix
+        ELSE
+             lower((da.REQUESTER)) = (hc.PRIMARY_WORK_EMAIL)
+             AND (TO_CHAR(DATE_TRUNC('second', hc.REPORT_EFFECTIVE_DATE_AND_TIME ), 'YYYY-MM-DD HH24:MI:SS')) > (TO_CHAR(TO_DATE(da.CREATEDAT ), 'YYYY-MM-DD'))
+             AND (TO_CHAR(DATE_TRUNC('second', hc.REPORT_EFFECTIVE_DATE_AND_TIME ), 'YYYY-MM-DD HH24:MI:SS')) < dateadd(DAY,1,(TO_CHAR(TO_DATE(da.CREATEDAT ), 'YYYY-MM-DD')))
+        END
+    where
+      hc.COST_CENTER_NAME IN ('Operations APAC', 'Ops EUROPE', 'Ops LATAM & MEA', 'Ops NORTHAM')
+      AND da.DOMAIN = 'account-details'
+),
+
+
+--Pulling contact data specifically. I could have done it in 1 query instead of 2 CTEs, but I want to make it easier to read
+b as (
+    select
+        attribution.CONTACT__LAST_CONTACT_REASON_TIER_ONE,
+        da.ACTIONID,
+        attribution.CONTACT__KEY
+    from RPT_CS_DATA.ANALYTICAL_CONTACT_ATTRIBUTION__CONTACTS attribution
+        left join rpt_cs_data.analytical_contacts__all_contacts_summary summary
+             on attribution.CONTACT__KEY=summary.CONTACT__KEY
+        left join MANUAL_AUTHORISATION.action action
+             on try_cast(summary.PROFILE__ID as integer)=action.PROFILE_ID
+        left join reports.DOUBLE_APPROVAL da
+            on da.actionid=action.ID
+    where action.profile_id is not null
+    -- Not the best join, but it's tough to find alternate tables
+    -- On the try_cast function, I took inspiration here
+    -- https://github.com/transferwise/analysts-airflow/blob/afa1eb3c0df8496718891e2bd3f561a8c8497584/workspace-analysts/dags/analysts/speed/experiments/verification_delay_estimate/verification_estimate_experiment_transfer_contact.sql
+)
+
+--Questions to answer here: How long do we need to wait for double approval to be given + how many contacts do we have during the process
+select
+    a.ACTIONTYPE,
+    a.COST_CENTER_NAME,
+    AVG(timestampdiff('seconds',( a.CREATEDAT  ),( a.ASSIGNEDAT  )) ) AS "da.average_waiting_time_seconds",
+    COUNT(DISTINCT a.ACTIONID) AS count_approvals,
+    count(distinct b.CONTACT__KEY) AS count_contacts
+from a join b on a.actionID=b.actionID
+group by a.COST_CENTER_NAME, a.actiontype
+order by count_contacts desc;
+--conclusion, surprisingly many requests to edit refund recipients, instead of creating. Perhaps we are having issues with parsing refund details
+-- No surprise APAC and Europe has the highest contacts. Both regions are known for task volume
+--Handy to plot data in superset, without avg data i.e. aggregrated data
